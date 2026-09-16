@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowDown, ArrowLeft, ArrowUp, Play, Plus, Trash2 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
+import { throwSupabaseQueryError } from "@/lib/supabase/query-error";
 import type { QuestionType } from "@/lib/types";
 import { addOption, addQuestion, deleteOption, deletePoll, deleteQuestion, launchPoll, moveQuestion, updatePoll, updateQuestion } from "../../actions";
 
@@ -10,15 +11,65 @@ const typeLabels: Record<QuestionType, string> = {
   rating: "Rating", free_text: "Free text",
 };
 
+type AnswerOptionRow = {
+  id: string;
+  question_id: string;
+  label: string;
+  position: number;
+};
+
 export default async function PollEditor({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase } = await requireAdmin();
-  const { data: poll } = await supabase.from("polls")
-    .select("id,title,description,allow_vote_changes,questions(id,prompt,type,position,settings,answer_options(id,label,position)),poll_sessions(id,status,join_code,created_at)")
-    .eq("id", id).single();
+
+  const { data: poll, error: pollError } = await supabase.from("polls")
+    .select("id,title,description,allow_vote_changes")
+    .eq("id", id)
+    .maybeSingle();
+  if (pollError) throwSupabaseQueryError("Load poll", pollError, { pollId: id });
   if (!poll) notFound();
-  const questions = [...(poll.questions ?? [])].sort((a, b) => a.position - b.position);
-  const sessions = [...(poll.poll_sessions ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  const [questionsResult, sessionsResult] = await Promise.all([
+    supabase.from("questions")
+      .select("id,prompt,type,position,settings")
+      .eq("poll_id", poll.id)
+      .order("position"),
+    supabase.from("poll_sessions")
+      .select("id,status,join_code,created_at")
+      .eq("poll_id", poll.id)
+      .order("created_at", { ascending: false }),
+  ]);
+  if (questionsResult.error) {
+    throwSupabaseQueryError("Load poll questions", questionsResult.error, { pollId: poll.id });
+  }
+  if (sessionsResult.error) {
+    throwSupabaseQueryError("Load poll sessions", sessionsResult.error, { pollId: poll.id });
+  }
+
+  const questionRows = questionsResult.data ?? [];
+  const questionIds = questionRows.map((question) => question.id);
+  const optionsResult = questionIds.length
+    ? await supabase.from("answer_options")
+      .select("id,question_id,label,position")
+      .in("question_id", questionIds)
+      .order("position")
+    : { data: [], error: null };
+  if (optionsResult.error) {
+    throwSupabaseQueryError("Load question answer options", optionsResult.error, { pollId: poll.id });
+  }
+
+  const optionRows = (optionsResult.data ?? []) as AnswerOptionRow[];
+  const optionsByQuestion = new Map<string, AnswerOptionRow[]>();
+  for (const option of optionRows) {
+    const options = optionsByQuestion.get(option.question_id) ?? [];
+    options.push(option);
+    optionsByQuestion.set(option.question_id, options);
+  }
+  const questions = questionRows.map((question) => ({
+    ...question,
+    answer_options: optionsByQuestion.get(question.id) ?? [],
+  }));
+  const sessions = sessionsResult.data ?? [];
 
   return (
     <main className="mx-auto max-w-6xl px-5 py-10">

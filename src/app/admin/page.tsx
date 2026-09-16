@@ -1,23 +1,48 @@
 import Link from "next/link";
 import { ArrowRight, Plus } from "lucide-react";
 import { requireAdmin } from "@/lib/auth";
+import { throwSupabaseQueryError } from "@/lib/supabase/query-error";
 import { createPoll } from "./actions";
+
+type PollSessionSummary = {
+  id: string;
+  poll_id: string;
+  status: string;
+  join_code: string;
+  created_at: string;
+};
 
 export default async function AdminDashboard() {
   const { supabase } = await requireAdmin();
   const { data: polls, error } = await supabase.from("polls")
-    .select("id,title,description,created_at,poll_sessions(id,status,join_code,created_at)")
+    .select("id,title,description,created_at")
     .order("created_at", { ascending: false });
-  if (error) throw new Error(error.message);
+  if (error) throwSupabaseQueryError("Load admin polls", error);
+
+  const pollRows = polls ?? [];
+  const pollIds = pollRows.map((poll) => poll.id);
+  const sessionsResult = pollIds.length
+    ? await supabase.from("poll_sessions")
+      .select("id,poll_id,status,join_code,created_at")
+      .in("poll_id", pollIds)
+      .order("created_at", { ascending: false })
+    : { data: [], error: null };
+  if (sessionsResult.error) throwSupabaseQueryError("Load admin poll sessions", sessionsResult.error);
+
+  const sessionRows = (sessionsResult.data ?? []) as PollSessionSummary[];
+  const latestSessionByPoll = new Map<string, PollSessionSummary>();
+  for (const session of sessionRows) {
+    if (!latestSessionByPoll.has(session.poll_id)) latestSessionByPoll.set(session.poll_id, session);
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-5 py-10">
       <div><p className="eyebrow">Dashboard</p><h1 className="mt-2 text-4xl font-black">Your polls</h1></div>
       <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_340px]">
         <section className="space-y-4">
-          {!polls?.length && <div className="card py-14 text-center text-slate-500">No polls yet. Create your first one to get started.</div>}
-          {polls?.map((poll) => {
-            const sessions = [...(poll.poll_sessions ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at));
-            const latest = sessions[0];
+          {!pollRows.length && <div className="card py-14 text-center text-slate-500">No polls yet. Create your first one to get started.</div>}
+          {pollRows.map((poll) => {
+            const latest = latestSessionByPoll.get(poll.id);
             return (
               <article className="card" key={poll.id}>
                 <div className="flex items-start justify-between gap-4">
