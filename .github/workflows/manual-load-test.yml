@@ -1,0 +1,38 @@
+name: Manual PulsePoll Load Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_code:
+        description: "Six-character live session code"
+        required: true
+        type: string
+
+jobs:
+  staged-load-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/initial-polling-vertical-slice
+
+      - uses: grafana/setup-k6-action@v1
+
+      - name: 10 users
+        run: k6 run -e BASE_URL=https://polling-software.vercel.app -e SESSION_CODE=${{ inputs.session_code }} -e VUS=10 load-tests/staged-production.js
+
+      - name: 50 users
+        run: k6 run -e BASE_URL=https://polling-software.vercel.app -e SESSION_CODE=${{ inputs.session_code }} -e VUS=50 load-tests/staged-production.js
+
+      - name: 100 users
+        run: k6 run -e BASE_URL=https://polling-software.vercel.app -e SESSION_CODE=${{ inputs.session_code }} -e VUS=100 load-tests/staged-production.js
+
+      - name: 200 users
+        run: k6 run -e BASE_URL=https://polling-software.vercel.app -e SESSION_CODE=${{ inputs.session_code }} -e VUS=200 load-tests/staged-production.js
+
+      - name: 400 users
+        run: k6 run -e BASE_URL=https://polling-software.vercel.app -e SESSION_CODE=${{ inputs.session_code }} -e VUS=400 load-tests/staged-production.js
+
+      - name: 600 users
+        run: k6 run -e BASE_URL=https://polling-software.vercel.app -e SESSION_CODE=${{ inputs.session_code }} -e VUS=600 load-tests/staged-production.js
