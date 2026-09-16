@@ -4,31 +4,43 @@ import { useEffect, useState } from "react";
 import { Users, Vote } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { applyResultBroadcast } from "@/lib/domain/realtime";
 import type { PublicSessionState } from "@/lib/types";
 import { ResultBars } from "@/components/result-bars";
 
 export function AdminLiveResults({ initial }: { initial: PublicSessionState }) {
   const [state, setState] = useState(initial);
   const router = useRouter();
+
+  useEffect(() => {
+    setState(initial);
+  }, [initial]);
+
   useEffect(() => {
     const supabase = createClient();
     const filter = `session_id=eq.${initial.sessionId}`;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        router.refresh();
+      }, 250);
+    };
+
     const channel = supabase.channel(`admin-session-${initial.sessionId}`)
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "poll_sessions", filter: `id=eq.${initial.sessionId}` }, () => router.refresh())
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "session_stats", filter }, ({ new: row }: { new: Record<string, unknown> }) => {
         setState((current) => ({ ...current, participantCount: Number(row.participant_count) }));
       })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "question_stats", filter }, ({ new: row }: { new: Record<string, unknown> }) => {
-        setState((current) => applyResultBroadcast(current, { kind: "response", questionId: String(row.question_id), count: Number(row.response_count) }));
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "option_counts", filter }, ({ new: row }: { new: Record<string, unknown> }) => {
-        setState((current) => applyResultBroadcast(current, { kind: "option", questionId: String(row.question_id), optionId: String(row.option_id), count: Number(row.vote_count) }));
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "rating_counts", filter }, ({ new: row }: { new: Record<string, unknown> }) => {
-        setState((current) => applyResultBroadcast(current, { kind: "rating", questionId: String(row.question_id), rating: Number(row.rating), count: Number(row.vote_count) }));
-      }).subscribe();
-    return () => { void supabase.removeChannel(channel); };
+      .on("postgres_changes", { event: "*", schema: "public", table: "question_count_shards", filter }, scheduleRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "option_count_shards", filter }, scheduleRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "rating_count_shards", filter }, scheduleRefresh)
+      .subscribe();
+
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      void supabase.removeChannel(channel);
+    };
   }, [initial.sessionId, router]);
 
   const responsePercentage = state.participantCount ? Math.min(100, (state.responseCount / state.participantCount) * 100) : 0;

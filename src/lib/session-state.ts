@@ -30,11 +30,11 @@ export async function getPublicSessionState(code: string, includeHiddenResults =
   let results: ResultItem[] = [];
 
   if (session.active_question_id) {
-    const [{ data: questionRow }, { data: options }, { data: questionStats }] = await Promise.all([
+    const [{ data: questionRow }, { data: options }, { data: questionShards }] = await Promise.all([
       db.from("questions").select("id,prompt,type,settings").eq("id", session.active_question_id).single(),
       db.from("answer_options").select("id,label,position").eq("question_id", session.active_question_id).order("position"),
-      db.from("question_stats").select("response_count").eq("session_id", session.id)
-        .eq("question_id", session.active_question_id).maybeSingle(),
+      db.from("question_count_shards").select("response_count").eq("session_id", session.id)
+        .eq("question_id", session.active_question_id),
     ]);
     if (questionRow) {
       question = {
@@ -47,23 +47,32 @@ export async function getPublicSessionState(code: string, includeHiddenResults =
         })),
       };
     }
-    responseCount = Number(questionStats?.response_count ?? 0);
+    responseCount = (questionShards ?? []).reduce((sum, row) => sum + Number(row.response_count ?? 0), 0);
 
     if (question && (includeHiddenResults || session.results_visible)) {
       if (["single_choice", "multiple_choice", "yes_no"].includes(question.type)) {
-        const { data: counts } = await db.from("option_counts").select("option_id,vote_count")
+        const { data: counts } = await db.from("option_count_shards").select("option_id,vote_count")
           .eq("session_id", session.id).eq("question_id", question.id);
-        const byOption = new Map((counts ?? []).map((row) => [row.option_id as string, Number(row.vote_count)]));
+        const byOption = new Map<string, number>();
+        for (const row of counts ?? []) {
+          const optionId = row.option_id as string;
+          byOption.set(optionId, (byOption.get(optionId) ?? 0) + Number(row.vote_count ?? 0));
+        }
         results = question.options.map((option) => {
           const count = byOption.get(option.id) ?? 0;
           return { optionId: option.id, label: option.label, count, percentage: responseCount ? (count / responseCount) * 100 : 0 };
         });
       } else if (question.type === "rating") {
-        const { data: counts } = await db.from("rating_counts").select("rating,vote_count")
-          .eq("session_id", session.id).eq("question_id", question.id).order("rating");
-        results = (counts ?? []).map((row) => ({
-          optionId: null, label: String(row.rating), count: Number(row.vote_count),
-          percentage: responseCount ? (Number(row.vote_count) / responseCount) * 100 : 0,
+        const { data: counts } = await db.from("rating_count_shards").select("rating,vote_count")
+          .eq("session_id", session.id).eq("question_id", question.id);
+        const byRating = new Map<number, number>();
+        for (const row of counts ?? []) {
+          const rating = Number(row.rating);
+          byRating.set(rating, (byRating.get(rating) ?? 0) + Number(row.vote_count ?? 0));
+        }
+        results = [...byRating.entries()].sort(([a], [b]) => a - b).map(([rating, count]) => ({
+          optionId: null, label: String(rating), count,
+          percentage: responseCount ? (count / responseCount) * 100 : 0,
         }));
       }
     }
