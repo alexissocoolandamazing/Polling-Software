@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Loader2, Radio } from "lucide-react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -18,6 +18,7 @@ export function LiveSession({ code }: { code: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState("");
+  const joinedCode = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/sessions/${code}/state`, { cache: "no-store" });
@@ -26,6 +27,12 @@ export function LiveSession({ code }: { code: string }) {
   }, [code]);
 
   useEffect(() => {
+    // React development mode can run mount effects more than once. Prevent a
+    // duplicate first-join request from creating two participant rows before
+    // the HttpOnly participant cookie from the first response is available.
+    if (joinedCode.current === code) return;
+    joinedCode.current = code;
+
     let active = true;
     async function join() {
       try {
