@@ -37,6 +37,24 @@ function summarise(label, rows) {
   return result;
 }
 
+function summariseMetric(label, values) {
+  const clean = values.filter(Number.isFinite);
+  if (!clean.length) {
+    console.log({ label, samples: 0, note: "Timing header unavailable; production may still be on an older build." });
+    return null;
+  }
+  const result = {
+    label,
+    samples: clean.length,
+    p50Ms: Math.round(percentile(clean, 50)),
+    p95Ms: Math.round(percentile(clean, 95)),
+    p99Ms: Math.round(percentile(clean, 99)),
+    maxMs: Math.round(Math.max(...clean)),
+  };
+  console.log(result);
+  return result;
+}
+
 async function timedFetch(url, options) {
   const start = performance.now();
   try {
@@ -53,6 +71,12 @@ function participantCookie(response) {
     ? response.headers.getSetCookie()
     : [response.headers.get("set-cookie")].filter(Boolean);
   return cookies[0]?.split(";")[0] || "";
+}
+
+function numericHeader(response, name) {
+  if (!response) return Number.NaN;
+  const value = Number(response.headers.get(name));
+  return Number.isFinite(value) ? value : Number.NaN;
 }
 
 function sleep(ms) {
@@ -124,11 +148,26 @@ const votes = await Promise.all(successful.map(async (join, i) => {
     body: JSON.stringify(body),
   });
   const status = result.response?.status ?? 0;
-  return { ok: status === 200, status, ms: result.ms, error: result.error };
+  const rpcMs = numericHeader(result.response, "x-pulsepoll-rpc-ms");
+  const appMs = numericHeader(result.response, "x-pulsepoll-app-ms");
+  return {
+    ok: status === 200,
+    status,
+    ms: result.ms,
+    rpcMs,
+    appMs,
+    outsideAppMs: Number.isFinite(appMs) ? Math.max(0, result.ms - appMs) : Number.NaN,
+    error: result.error,
+  };
 }));
 
 console.log("\n========== SIMULTANEOUS VOTE BURST RESULTS ==========");
 const voteResult = summarise(`vote-burst-${successful.length}`, votes);
+
+console.log("\n========== SERVER-SIDE VOTE TIMING ==========");
+summariseMetric("vercel-to-supabase-rpc", votes.map((row) => row.rpcMs));
+summariseMetric("vercel-app-total", votes.map((row) => row.appMs));
+summariseMetric("client/network-or-upstream-queue", votes.map((row) => row.outsideAppMs));
 
 console.log("\n========== VERDICT ==========");
 console.log({
