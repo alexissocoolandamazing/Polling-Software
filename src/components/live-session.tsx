@@ -10,7 +10,7 @@ import {
   isSessionStateRelayMessage,
   RELAY_FALLBACK_POLL_MS,
   relayReconnectDelay,
-  sessionControlSignature,
+  sessionQuestionKey,
 } from "@/lib/domain/relay";
 import { ResultBars } from "@/components/result-bars";
 
@@ -25,19 +25,19 @@ export function LiveSession({ code }: { code: string }) {
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState("");
   const joinRequest = useRef<{ code: string; promise: Promise<void> } | null>(null);
-  const lastControlSignature = useRef<string | null>(null);
+  const lastQuestionKey = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/sessions/${code}/state`, { cache: "no-store" });
     if (!response.ok) throw new Error((await response.json()).error ?? "Session unavailable.");
     const nextState = await response.json() as PublicSessionState;
-    const nextSignature = sessionControlSignature(nextState);
-    if (lastControlSignature.current && lastControlSignature.current !== nextSignature) {
+    const nextQuestionKey = sessionQuestionKey(nextState);
+    if (lastQuestionKey.current && lastQuestionKey.current !== nextQuestionKey) {
       setConfirmed(false);
       setVote(emptyVote);
       setError("");
     }
-    lastControlSignature.current = nextSignature;
+    lastQuestionKey.current = nextQuestionKey;
     setState(nextState);
   }, [code]);
 
@@ -187,8 +187,8 @@ export function LiveSession({ code }: { code: string }) {
         <p className="eyebrow">{state.pollTitle}</p>
         {!question ? <div className="py-14 text-center"><h1 className="text-2xl font-black">Waiting for a question</h1><p className="mt-2 text-slate-500">Your host will begin shortly.</p></div> : <>
           <h1 className="mt-3 text-2xl font-black leading-tight sm:text-3xl">{question.prompt}</h1>
-          {!state.votingOpen ? <div className="mt-8 rounded-2xl bg-amber-50 p-5 text-center"><p className="font-bold text-amber-900">Voting is currently closed</p><p className="mt-1 text-sm text-amber-700">This screen updates automatically.</p></div>
-            : confirmed ? <div className="mt-8 rounded-2xl bg-emerald-50 p-7 text-center"><CheckCircle2 className="mx-auto text-emerald-600" size={42} /><h2 className="mt-3 text-xl font-black text-emerald-900">Response recorded</h2><p className="mt-1 text-sm text-emerald-700">You’re all set for this question.</p>{state.allowVoteChanges && <button type="button" className="btn-secondary mt-4" onClick={() => setConfirmed(false)}>Change response</button>}</div>
+          {confirmed ? <div className="mt-8 rounded-2xl bg-emerald-50 p-7 text-center"><CheckCircle2 className="mx-auto text-emerald-600" size={42} /><h2 className="mt-3 text-xl font-black text-emerald-900">Response recorded</h2><p className="mt-1 text-sm text-emerald-700">You’re all set for this question.</p>{state.allowVoteChanges && state.votingOpen && <button type="button" className="btn-secondary mt-4" onClick={() => setConfirmed(false)}>Change response</button>}</div>
+            : !state.votingOpen ? <div className="mt-8 rounded-2xl bg-amber-50 p-5 text-center"><p className="font-bold text-amber-900">Voting is currently closed</p><p className="mt-1 text-sm text-amber-700">This screen updates automatically.</p></div>
             : <form className="mt-7 space-y-3" onSubmit={submit}>
               {question.options.map((option) => <label className={`flex min-h-14 items-center gap-3 rounded-xl border p-4 font-semibold transition ${vote.optionIds.includes(option.id) ? "border-indigo-500 bg-indigo-50 text-indigo-900" : "border-slate-200"}`} key={option.id}><input type={question.type === "multiple_choice" ? "checkbox" : "radio"} name="answer" checked={vote.optionIds.includes(option.id)} onChange={() => setVote((current) => ({ ...current, optionIds: question.type === "multiple_choice" ? (current.optionIds.includes(option.id) ? current.optionIds.filter((id) => id !== option.id) : [...current.optionIds, option.id]) : [option.id] }))} />{option.label}</label>)}
               {question.type === "rating" && <div className="grid grid-cols-5 gap-2">{Array.from({ length: ratingRange.max - ratingRange.min + 1 }, (_, index) => index + ratingRange.min).map((rating) => <button type="button" onClick={() => setVote((current) => ({ ...current, ratingAnswer: rating }))} className={`aspect-square rounded-xl border text-lg font-black ${vote.ratingAnswer === rating ? "border-indigo-500 bg-indigo-600 text-white" : "border-slate-200 bg-white"}`} key={rating}>{rating}</button>)}</div>}

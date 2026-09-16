@@ -35,11 +35,6 @@ export function isSessionStateRelayMessage(data: unknown): boolean {
   }
 }
 
-export function sessionControlSignature(state: PublicSessionState): string {
-  return [
-    state.status,
-    state.question?.id ?? "",
-    state.votingOpen ? "open" : "closed",
-    state.resultsVisible ? "shown" : "hidden",
-  ].join(":");
+export function sessionQuestionKey(state: PublicSessionState): string {
+  return `${state.sessionId}:${state.question?.id ?? ""}`;
 }

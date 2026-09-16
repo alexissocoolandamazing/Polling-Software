@@ -3,7 +3,7 @@ import {
   buildRelayWebSocketUrl,
   isSessionStateRelayMessage,
   relayReconnectDelay,
-  sessionControlSignature,
+  sessionQuestionKey,
 } from "./relay";
 import type { PublicSessionState } from "@/lib/types";
 
@@ -26,7 +26,7 @@ describe("participant relay helpers", () => {
     expect(relayReconnectDelay(20, () => 0.5)).toBe(30_000);
   });
 
-  it("ignores result-count changes when detecting host control changes", () => {
+  it("preserves participant response state for same-question session updates", () => {
     const state: PublicSessionState = {
       sessionId: "session",
       code: "ABC234",
@@ -41,7 +41,33 @@ describe("participant relay helpers", () => {
       results: [],
     };
 
-    expect(sessionControlSignature({ ...state, responseCount: 2 })).toBe(sessionControlSignature(state));
-    expect(sessionControlSignature({ ...state, votingOpen: false })).not.toBe(sessionControlSignature(state));
+    const questionKey = sessionQuestionKey(state);
+
+    expect(sessionQuestionKey({ ...state, responseCount: 2 })).toBe(questionKey);
+    expect(sessionQuestionKey({ ...state, resultsVisible: true })).toBe(questionKey);
+    expect(sessionQuestionKey({ ...state, votingOpen: false })).toBe(questionKey);
+    expect(sessionQuestionKey({ ...state, status: "ended" })).toBe(questionKey);
+  });
+
+  it("detects a genuinely different active question", () => {
+    const state: PublicSessionState = {
+      sessionId: "session",
+      code: "ABC234",
+      pollTitle: "Poll",
+      status: "live",
+      votingOpen: true,
+      resultsVisible: false,
+      allowVoteChanges: false,
+      question: { id: "question-a", prompt: "Question A", type: "single_choice", settings: {}, options: [] },
+      responseCount: 1,
+      participantCount: 2,
+      results: [],
+    };
+
+    expect(sessionQuestionKey({
+      ...state,
+      question: { ...state.question!, id: "question-b", prompt: "Question B" },
+    })).not.toBe(sessionQuestionKey(state));
+    expect(sessionQuestionKey({ ...state, question: null })).not.toBe(sessionQuestionKey(state));
   });
 });
