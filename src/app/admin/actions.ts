@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth";
+import { throwSupabaseQueryError } from "@/lib/supabase/query-error";
 import { pollSchema, questionSchema } from "@/lib/validation";
 
 const uuid = z.uuid();
@@ -162,14 +163,38 @@ function makeCode() {
 export async function launchPoll(formData: FormData) {
   const { supabase } = await requireAdmin();
   const pollId = uuid.parse(formData.get("pollId"));
-  const { data: questions } = await supabase.from("questions").select("id,prompt,type,answer_options(id)")
-    .eq("poll_id", pollId).order("position");
-  const firstQuestion = questions?.[0];
+
+  const questionsResult = await supabase.from("questions")
+    .select("id,prompt,type")
+    .eq("poll_id", pollId)
+    .order("position");
+  if (questionsResult.error) {
+    throwSupabaseQueryError("Load questions before launch", questionsResult.error, { pollId });
+  }
+
+  const questions = questionsResult.data ?? [];
+  const firstQuestion = questions[0];
   if (!firstQuestion) throw new Error("Add at least one question before launching.");
+
+  const questionIds = questions.map((question) => question.id);
+  const optionsResult = await supabase.from("answer_options")
+    .select("question_id")
+    .in("question_id", questionIds);
+  if (optionsResult.error) {
+    throwSupabaseQueryError("Load answer options before launch", optionsResult.error, { pollId });
+  }
+
+  const optionCounts = new Map<string, number>();
+  for (const option of optionsResult.data ?? []) {
+    optionCounts.set(option.question_id, (optionCounts.get(option.question_id) ?? 0) + 1);
+  }
+
   const incomplete = questions.find((question) =>
-    ["single_choice", "multiple_choice", "yes_no"].includes(question.type) && question.answer_options.length < 2,
+    ["single_choice", "multiple_choice", "yes_no"].includes(question.type)
+      && (optionCounts.get(question.id) ?? 0) < 2,
   );
   if (incomplete) throw new Error(`Add at least two options to “${incomplete.prompt}” before launching.`);
+
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const { data, error } = await supabase.from("poll_sessions").insert({
       poll_id: pollId, join_code: makeCode(), status: "live", active_question_id: firstQuestion.id,
