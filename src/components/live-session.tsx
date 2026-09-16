@@ -18,7 +18,7 @@ export function LiveSession({ code }: { code: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState("");
-  const joinedCode = useRef<string | null>(null);
+  const joinRequest = useRef<{ code: string; promise: Promise<void> } | null>(null);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/sessions/${code}/state`, { cache: "no-store" });
@@ -27,22 +27,34 @@ export function LiveSession({ code }: { code: string }) {
   }, [code]);
 
   useEffect(() => {
-    // React development mode can run mount effects more than once. Prevent a
-    // duplicate first-join request from creating two participant rows before
-    // the HttpOnly participant cookie from the first response is available.
-    if (joinedCode.current === code) return;
-    joinedCode.current = code;
-
     let active = true;
-    async function join() {
-      try {
-        const response = await fetch(`/api/sessions/${code}/join`, { method: "POST" });
-        if (!response.ok) throw new Error((await response.json()).error ?? "Could not join.");
-        await refresh();
-      } catch (reason) { if (active) setError(reason instanceof Error ? reason.message : "Could not join."); }
-      finally { if (active) setLoading(false); }
+
+    // React Strict Mode can run the mount effect twice in development. Reuse
+    // one in-flight join request so we neither create duplicate participants
+    // nor leave the second effect stuck in the loading state.
+    if (!joinRequest.current || joinRequest.current.code !== code) {
+      joinRequest.current = {
+        code,
+        promise: (async () => {
+          const response = await fetch(`/api/sessions/${code}/join`, { method: "POST" });
+          if (!response.ok) throw new Error((await response.json()).error ?? "Could not join.");
+        })(),
+      };
     }
-    void join();
+
+    async function finishJoin() {
+      try {
+        await joinRequest.current!.promise;
+        if (!active) return;
+        await refresh();
+      } catch (reason) {
+        if (active) setError(reason instanceof Error ? reason.message : "Could not join.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void finishJoin();
     return () => { active = false; };
   }, [code, refresh]);
 
