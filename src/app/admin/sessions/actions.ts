@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth";
+import { notifyParticipantRelay } from "@/lib/realtime-relay";
 
 export async function controlSession(formData: FormData) {
   const { supabase } = await requireAdmin();
@@ -10,7 +11,7 @@ export async function controlSession(formData: FormData) {
   const action = z.enum(["open", "close", "next", "previous", "reveal", "hide", "end", "set"])
     .parse(formData.get("control"));
   const { data: session, error } = await supabase.from("poll_sessions")
-    .select("id,poll_id,active_question_id,status").eq("id", sessionId).single();
+    .select("id,poll_id,join_code,active_question_id,status").eq("id", sessionId).single();
   if (error) throw new Error("Session not found.");
 
   let update: Record<string, unknown> = {};
@@ -29,6 +30,7 @@ export async function controlSession(formData: FormData) {
   if (Object.keys(update).length) {
     const { error: updateError } = await supabase.from("poll_sessions").update(update).eq("id", sessionId);
     if (updateError) throw new Error(updateError.message);
+    await notifyParticipantRelay(session.join_code);
   }
   revalidatePath(`/admin/sessions/${sessionId}`);
 }

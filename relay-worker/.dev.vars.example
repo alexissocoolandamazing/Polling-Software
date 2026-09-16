@@ -1,0 +1,2 @@
+# Use the same long random value for REALTIME_RELAY_SECRET in Vercel.
+RELAY_SHARED_SECRET=replace-with-a-long-random-secret

@@ -1,8 +1,12 @@
 node_modules/
 .next/
 out/
+/dist/
 coverage/
 .vercel/
+.wrangler/
+.dev.vars
+relay-worker/dist/
 .env
 .env.local
 .env.*.local

@@ -3,9 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Loader2, Radio } from "lucide-react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import type { PublicSessionState } from "@/lib/types";
 import { validateVoteShape } from "@/lib/domain/vote";
+import {
+  buildRelayWebSocketUrl,
+  isSessionStateRelayMessage,
+  RELAY_FALLBACK_POLL_MS,
+  relayReconnectDelay,
+  sessionControlSignature,
+} from "@/lib/domain/relay";
 import { ResultBars } from "@/components/result-bars";
 
 type VoteDraft = { optionIds: string[]; textAnswer: string | null; ratingAnswer: number | null };
@@ -19,11 +25,20 @@ export function LiveSession({ code }: { code: string }) {
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState("");
   const joinRequest = useRef<{ code: string; promise: Promise<void> } | null>(null);
+  const lastControlSignature = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/sessions/${code}/state`, { cache: "no-store" });
     if (!response.ok) throw new Error((await response.json()).error ?? "Session unavailable.");
-    setState(await response.json() as PublicSessionState);
+    const nextState = await response.json() as PublicSessionState;
+    const nextSignature = sessionControlSignature(nextState);
+    if (lastControlSignature.current && lastControlSignature.current !== nextSignature) {
+      setConfirmed(false);
+      setVote(emptyVote);
+      setError("");
+    }
+    lastControlSignature.current = nextSignature;
+    setState(nextState);
   }, [code]);
 
   useEffect(() => {
@@ -59,11 +74,88 @@ export function LiveSession({ code }: { code: string }) {
   }, [code, refresh]);
 
   useEffect(() => {
-    const supabase = createClient();
-    const channel = supabase.channel(`session:${code}`, { config: { private: false } })
-      .on("broadcast", { event: "session_state" }, () => { setConfirmed(false); setVote(emptyVote); void refresh(); })
-      .subscribe();
-    return () => { void supabase.removeChannel(channel); };
+    const endpoint = buildRelayWebSocketUrl(process.env.NEXT_PUBLIC_REALTIME_RELAY_URL, code);
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectAttempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+
+    const refreshSilently = () => {
+      void refresh().catch(() => undefined);
+    };
+    const startFallbackPolling = () => {
+      if (fallbackTimer) return;
+      refreshSilently();
+      fallbackTimer = setInterval(refreshSilently, RELAY_FALLBACK_POLL_MS);
+    };
+    const stopFallbackPolling = () => {
+      if (!fallbackTimer) return;
+      clearInterval(fallbackTimer);
+      fallbackTimer = null;
+    };
+    const scheduleReconnect = () => {
+      if (!endpoint || disposed || reconnectTimer) return;
+      const delay = relayReconnectDelay(reconnectAttempt++);
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, delay);
+    };
+    const connect = () => {
+      if (!endpoint || disposed || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
+        if (!endpoint) startFallbackPolling();
+        return;
+      }
+
+      let nextSocket: WebSocket;
+      try {
+        nextSocket = new WebSocket(endpoint);
+      } catch {
+        startFallbackPolling();
+        scheduleReconnect();
+        return;
+      }
+      socket = nextSocket;
+      nextSocket.addEventListener("open", () => {
+        reconnectAttempt = 0;
+        stopFallbackPolling();
+        refreshSilently();
+      });
+      nextSocket.addEventListener("message", (event) => {
+        if (isSessionStateRelayMessage(event.data)) refreshSilently();
+      });
+      nextSocket.addEventListener("close", () => {
+        if (socket === nextSocket) socket = null;
+        if (disposed) return;
+        startFallbackPolling();
+        scheduleReconnect();
+      });
+      nextSocket.addEventListener("error", () => nextSocket.close());
+    };
+    const reconnectNow = () => {
+      refreshSilently();
+      if (!endpoint || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      connect();
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") reconnectNow();
+    };
+
+    connect();
+    window.addEventListener("online", reconnectNow);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      disposed = true;
+      window.removeEventListener("online", reconnectNow);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      stopFallbackPolling();
+      socket?.close(1000, "Participant left");
+    };
   }, [code, refresh]);
 
   const ratingRange = useMemo(() => ({ min: state?.question?.settings.min ?? 1, max: state?.question?.settings.max ?? 5 }), [state]);

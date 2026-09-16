@@ -5,11 +5,18 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:relay": "wrangler deploy --dry-run --outdir dist --config relay-worker/wrangler.jsonc",
+    "deploy:relay": "wrangler deploy --config relay-worker/wrangler.jsonc",
+    "dev:relay": "wrangler dev --config relay-worker/wrangler.jsonc",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:relay": "vitest run --config relay-worker/vitest.config.mts",
     "test:watch": "vitest",
+    "typecheck:relay": "npm run types:relay:check && tsc --noEmit --project relay-worker/tsconfig.json",
+    "types:relay": "wrangler types relay-worker/worker-configuration.d.ts --include-runtime false --env-file relay-worker/.dev.vars.example --config relay-worker/wrangler.jsonc",
+    "types:relay:check": "wrangler types relay-worker/worker-configuration.d.ts --check --include-runtime false --env-file relay-worker/.dev.vars.example --config relay-worker/wrangler.jsonc",
     "load:smoke": "k6 run load-tests/poll-session.js"
   },
   "dependencies": {
@@ -23,6 +30,8 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.1.10",
+    "@cloudflare/workers-types": "5.20260916.1",
     "@tailwindcss/postcss": "^4.1.0",
     "@types/node": "^22.0.0",
     "@types/qrcode": "^1.5.5",
@@ -32,10 +41,11 @@
     "eslint-config-next": "^16.3.5",
     "jsdom": "^26.0.0",
     "tailwindcss": "^4.1.0",
-    "typescript": "^5.9.0",
-    "vitest": "^5.0.1"
+    "typescript": "5.9.3",
+    "vitest": "4.1.11",
+    "wrangler": "4.132.0"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.0.0"
   }
 }
