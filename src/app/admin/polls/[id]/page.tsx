@@ -3,13 +3,9 @@ import { ArrowDown, ArrowLeft, ArrowUp, Play, Plus, Trash2 } from "lucide-react"
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { throwSupabaseQueryError } from "@/lib/supabase/query-error";
-import type { QuestionType } from "@/lib/types";
+import { QUESTION_TYPE_LABELS, type QuestionType } from "@/lib/types";
+import { QuestionTypeFields } from "@/components/question-type-fields";
 import { addOption, addQuestion, deleteOption, deletePoll, deleteQuestion, launchPoll, moveQuestion, updatePoll, updateQuestion } from "../../actions";
-
-const typeLabels: Record<QuestionType, string> = {
-  single_choice: "Single choice", multiple_choice: "Multiple choice", yes_no: "Yes / No",
-  rating: "Rating", free_text: "Free text",
-};
 
 type AnswerOptionRow = {
   id: string;
@@ -89,7 +85,7 @@ export default async function PollEditor({ params }: { params: Promise<{ id: str
             return (
               <article className="card" key={question.id}>
                 <div className="flex items-start justify-between gap-3">
-                  <div><span className="text-xs font-bold text-indigo-600">QUESTION {index + 1} · {typeLabels[question.type as QuestionType]}</span><h3 className="mt-1 text-lg font-bold">{question.prompt}</h3></div>
+                  <div><span className="text-xs font-bold text-indigo-600">QUESTION {index + 1} · {QUESTION_TYPE_LABELS[question.type as QuestionType]}</span><h3 className="mt-1 text-lg font-bold">{question.prompt}</h3></div>
                   <div className="flex gap-1">
                     <form action={moveQuestion}><input type="hidden" name="pollId" value={poll.id} /><input type="hidden" name="questionId" value={question.id} /><input type="hidden" name="direction" value="up" /><button className="btn-secondary min-h-9 px-2" disabled={index === 0} title="Move up"><ArrowUp size={15} /></button></form>
                     <form action={moveQuestion}><input type="hidden" name="pollId" value={poll.id} /><input type="hidden" name="questionId" value={question.id} /><input type="hidden" name="direction" value="down" /><button className="btn-secondary min-h-9 px-2" disabled={index === questions.length - 1} title="Move down"><ArrowDown size={15} /></button></form>
@@ -102,8 +98,7 @@ export default async function PollEditor({ params }: { params: Promise<{ id: str
                   <form action={updateQuestion} className="mt-3 space-y-3">
                     <input type="hidden" name="pollId" value={poll.id} /><input type="hidden" name="questionId" value={question.id} />
                     <textarea className="field min-h-20" name="prompt" defaultValue={question.prompt} required maxLength={500} />
-                    <select className="field" name="type" defaultValue={question.type}>{Object.entries(typeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
-                    <div className="grid grid-cols-2 gap-2"><div><label className="label">Rating min</label><input className="field" name="ratingMin" type="number" min={0} max={9} defaultValue={Number((question.settings as { min?: number }).min ?? 1)} /></div><div><label className="label">Rating max</label><input className="field" name="ratingMax" type="number" min={1} max={10} defaultValue={Number((question.settings as { max?: number }).max ?? 5)} /></div></div>
+                    <QuestionTypeFields defaultType={question.type as QuestionType} defaultMin={Number((question.settings as { min?: number }).min ?? 1)} defaultMax={Number((question.settings as { max?: number }).max ?? 5)} />
                     <button className="btn-secondary w-full">Save question</button>
                   </form>
                 </details>
@@ -118,7 +113,7 @@ export default async function PollEditor({ params }: { params: Promise<{ id: str
 
         <aside className="space-y-5">
           <section className="card"><h2 className="text-lg font-bold">Poll settings</h2><form action={updatePoll} className="mt-4 space-y-4"><input type="hidden" name="pollId" value={poll.id} /><div><label className="label">Title</label><input className="field" name="title" defaultValue={poll.title} required maxLength={120} /></div><div><label className="label">Description</label><textarea className="field min-h-20" name="description" defaultValue={poll.description} maxLength={1000} /></div><label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" name="allowVoteChanges" defaultChecked={poll.allow_vote_changes} /><span><strong>Allow vote changes</strong><br /><span className="text-slate-500">Participants can replace a submitted answer.</span></span></label><button className="btn-primary w-full">Save settings</button></form></section>
-          <section className="card"><h2 className="text-lg font-bold">Add question</h2><form action={addQuestion} className="mt-4 space-y-3"><input type="hidden" name="pollId" value={poll.id} /><textarea className="field min-h-20" name="prompt" required maxLength={500} placeholder="What would you like to ask?" /><select className="field" name="type" defaultValue="single_choice">{Object.entries(typeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><div className="grid grid-cols-2 gap-2"><div><label className="label">Rating min</label><input className="field" name="ratingMin" type="number" min={0} max={9} defaultValue={1} /></div><div><label className="label">Rating max</label><input className="field" name="ratingMax" type="number" min={1} max={10} defaultValue={5} /></div></div><button className="btn-primary w-full"><Plus size={16} /> Add question</button></form></section>
+          <section className="card"><h2 className="text-lg font-bold">Add question</h2><form action={addQuestion} className="mt-4 space-y-3"><input type="hidden" name="pollId" value={poll.id} /><textarea className="field min-h-20" name="prompt" required maxLength={500} placeholder="What would you like to ask?" /><QuestionTypeFields defaultType="single_choice" /><button className="btn-primary w-full"><Plus size={16} /> Add question</button></form></section>
           {sessions.length > 0 && <section className="card"><h2 className="text-lg font-bold">Sessions</h2><div className="mt-3 space-y-2">{sessions.map((session) => <Link className="flex items-center justify-between rounded-xl bg-slate-50 p-3 text-sm font-semibold hover:bg-slate-100" href={`/admin/sessions/${session.id}`} key={session.id}><span>{session.join_code}</span><span className="capitalize text-slate-500">{session.status}</span></Link>)}</div></section>}
           <section className="card border-red-100"><h2 className="text-sm font-bold text-red-700">Danger zone</h2><form action={deletePoll} className="mt-3"><input type="hidden" name="pollId" value={poll.id} /><button className="btn-danger w-full"><Trash2 size={16} /> Delete poll</button></form></section>
         </aside>
