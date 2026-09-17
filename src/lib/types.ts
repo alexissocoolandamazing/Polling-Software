@@ -1,5 +1,9 @@
 export const QUESTION_TYPES = ["single_choice", "multiple_choice", "yes_no", "rating", "free_text"] as const;
 export type QuestionType = (typeof QUESTION_TYPES)[number];
+export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+  single_choice: "Single choice", multiple_choice: "Multiple choice", yes_no: "Yes / No",
+  rating: "Rating", free_text: "Free text",
+};
 export type SessionStatus = "draft" | "live" | "ended";
 
 export interface AnswerOption {
