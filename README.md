@@ -2,13 +2,24 @@
 
 PulsePoll is a mobile-first live polling platform for events. It supports anonymous participant joins, authenticated poll administration, transactional voting, live results, presentation mode, and a Cloudflare WebSocket relay for participant session-state updates.
 
+**Individual project.** Built by Alex.
+
+## At a glance
+
+- Anonymous participation using a six-character session code
+- Authenticated poll administration and presentation mode
+- Transactional voting with sharded PostgreSQL counters
+- Realtime updates with a WebSocket relay and polling fallback
+
+The repository includes application tests, relay tests and load-test scripts. See [Current limitations](#current-limitations) before relying on it for a public event. [PRODUCT_SPEC.md](PRODUCT_SPEC.md) records the product specification; planned features should be read separately from the implemented behaviour below.
+
 ## Live app
 
 - **Participant app:** https://polling-software.vercel.app/
 - **Admin login:** https://polling-software.vercel.app/login
 - **Repository:** https://github.com/alexissocoolandamazing/Polling-Software
 
-### For friends testing the app
+### Participant walkthrough
 
 1. Open https://polling-software.vercel.app/ on your phone or laptop.
 2. Enter the current six-character session code supplied by the host.
@@ -24,9 +35,9 @@ https://polling-software.vercel.app/session/ABC234
 
 Replace `ABC234` with the current live session code.
 
-## Current production validation
+## Previously reported load-test results
 
-The production deployment has been exercised with event-style load tests rather than only local/unit tests.
+The following figures were recorded in the project's existing documentation for an event-style scenario against the deployed app. They describe that scenario, not a guaranteed capacity or service level. A dated run output and source commit are not linked here, so treat these as reported results rather than independently reproducible benchmarks.
 
 - 400 participants joining gradually over 60 seconds: **400/400 successful**
 - 300 votes spread across 10 seconds: **300/300 successful**
@@ -34,7 +45,7 @@ The production deployment has been exercised with event-style load tests rather 
 - realistic vote p99 latency: **~1.14 s**
 - a dedicated Cloudflare WebSocket relay load-test harness is included for large concurrent realtime connection testing
 
-The more extreme synthetic case where hundreds of users submit at essentially the exact same instant is intentionally harsher than the expected event pattern and produces higher latency, while still preserving vote correctness.
+The repository also includes a more extreme simultaneous-vote scenario. Its results should be evaluated separately from the gradual-join and distributed-vote scenario above. Test harnesses are included below; running them against a live session changes that session's data.
 
 ## Stack
 
